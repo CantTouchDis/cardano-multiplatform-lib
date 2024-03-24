@@ -2,8 +2,10 @@
 // https://github.com/dcSpark/cddl-codegen
 
 pub mod serialization;
+pub mod utils;
 
 use crate::byron::{Blake2b256, ByronPubKey, ByronSignature, ByronTxId};
+
 use cml_chain::byron::ByronTxOut;
 use std::collections::BTreeMap;
 

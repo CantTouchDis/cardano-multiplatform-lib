@@ -1,11 +1,66 @@
 use super::{CostModels, Language, Redeemer};
 use super::{ExUnits, PlutusData, PlutusV1Script, PlutusV2Script, PlutusV3Script};
+use crate::crypto::hash::{hash_script, ScriptHashNamespace};
+use crate::json::plutus_datums::{
+    decode_plutus_datum_to_json_value, encode_json_value_to_plutus_datum,
+    CardanoNodePlutusDatumSchema,
+};
 use cbor_event::de::Deserializer;
 use cbor_event::se::Serializer;
 use cml_core::serialization::*;
 use cml_core::{error::*, Int};
+use cml_crypto::ScriptHash;
 use std::collections::BTreeMap;
 use std::io::{BufRead, Seek, Write};
+
+impl serde::Serialize for PlutusData {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let json_value =
+            decode_plutus_datum_to_json_value(self, CardanoNodePlutusDatumSchema::DetailedSchema)
+                .expect("DetailedSchema can represent everything");
+        serde_json::Value::from(json_value).serialize(serializer)
+    }
+}
+
+impl<'de> serde::de::Deserialize<'de> for PlutusData {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let serde_json_value =
+            <serde_json::Value as serde::de::Deserialize>::deserialize(deserializer)?;
+        let json_value = crate::json::json_serialize::Value::from(serde_json_value);
+        encode_json_value_to_plutus_datum(
+            json_value.clone(),
+            CardanoNodePlutusDatumSchema::DetailedSchema,
+        )
+        .map_err(|_e| {
+            serde::de::Error::invalid_value(
+                (&json_value).into(),
+                &"invalid plutus datum (cardano-node JSON format)",
+            )
+        })
+    }
+}
+
+impl schemars::JsonSchema for PlutusData {
+    fn schema_name() -> String {
+        String::from("PlutusData")
+    }
+
+    fn json_schema(_gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        schemars::schema::Schema::from(schemars::schema::SchemaObject::new_ref(
+            "PlutusData".to_owned(),
+        ))
+    }
+
+    fn is_referenceable() -> bool {
+        true
+    }
+}
 
 #[derive(
     Clone, Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema, derivative::Derivative,
@@ -348,6 +403,7 @@ impl CostModels {
 pub enum PlutusScript {
     PlutusV1(PlutusV1Script),
     PlutusV2(PlutusV2Script),
+    PlutusV3(PlutusV3Script),
 }
 
 impl PlutusScript {
@@ -355,6 +411,7 @@ impl PlutusScript {
         match &self {
             Self::PlutusV1(script) => script.hash(),
             Self::PlutusV2(script) => script.hash(),
+            Self::PlutusV3(script) => script.hash(),
         }
     }
 
@@ -362,11 +419,28 @@ impl PlutusScript {
         match self {
             Self::PlutusV1(_) => Language::PlutusV1,
             Self::PlutusV2(_) => Language::PlutusV2,
+            Self::PlutusV3(_) => Language::PlutusV3,
         }
     }
 }
-use crate::crypto::hash::{hash_script, ScriptHashNamespace};
-use cml_crypto::ScriptHash;
+
+impl From<PlutusV1Script> for PlutusScript {
+    fn from(script: PlutusV1Script) -> Self {
+        Self::PlutusV1(script)
+    }
+}
+
+impl From<PlutusV2Script> for PlutusScript {
+    fn from(script: PlutusV2Script) -> Self {
+        Self::PlutusV2(script)
+    }
+}
+
+impl From<PlutusV3Script> for PlutusScript {
+    fn from(script: PlutusV3Script) -> Self {
+        Self::PlutusV3(script)
+    }
+}
 
 impl PlutusV1Script {
     pub fn hash(&self) -> ScriptHash {
@@ -413,15 +487,7 @@ pub fn compute_total_ex_units(redeemers: &[Redeemer]) -> Result<ExUnits, Arithme
     Ok(sum)
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Deserialize,
-    serde::Serialize,
-    schemars::JsonSchema,
-    derivative::Derivative,
-)]
+#[derive(Clone, Debug, Default, derivative::Derivative)]
 #[derivative(Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct PlutusMap {
     // possibly duplicates (very rare - only found on testnet)
@@ -432,7 +498,6 @@ pub struct PlutusMap {
         PartialOrd = "ignore",
         Hash = "ignore"
     )]
-    #[serde(skip)]
     pub encoding: LenEncoding,
 }
 

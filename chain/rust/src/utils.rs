@@ -65,6 +65,7 @@ impl From<PlutusScript> for Script {
         match script {
             PlutusScript::PlutusV1(v1) => Self::new_plutus_v1(v1),
             PlutusScript::PlutusV2(v2) => Self::new_plutus_v2(v2),
+            PlutusScript::PlutusV3(v3) => Self::new_plutus_v3(v3),
         }
     }
 }
@@ -196,7 +197,7 @@ enum BigIntEncoding {
 
 #[derive(Clone, Debug, Derivative)]
 #[derivative(Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct BigInt {
+pub struct BigInteger {
     num: num_bigint::BigInt,
     #[derivative(
         PartialEq = "ignore",
@@ -207,7 +208,7 @@ pub struct BigInt {
     encoding: Option<BigIntEncoding>,
 }
 
-impl serde::Serialize for BigInt {
+impl serde::Serialize for BigInteger {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -216,14 +217,14 @@ impl serde::Serialize for BigInt {
     }
 }
 
-impl<'de> serde::de::Deserialize<'de> for BigInt {
+impl<'de> serde::de::Deserialize<'de> for BigInteger {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::de::Deserializer<'de>,
     {
         use std::str::FromStr;
         let s = <String as serde::de::Deserialize>::deserialize(deserializer)?;
-        BigInt::from_str(&s).map_err(|_e| {
+        BigInteger::from_str(&s).map_err(|_e| {
             serde::de::Error::invalid_value(
                 serde::de::Unexpected::Str(&s),
                 &"string rep of a big int",
@@ -232,9 +233,9 @@ impl<'de> serde::de::Deserialize<'de> for BigInt {
     }
 }
 
-impl schemars::JsonSchema for BigInt {
+impl schemars::JsonSchema for BigInteger {
     fn schema_name() -> String {
-        String::from("BigInt")
+        String::from("BigInteger")
     }
     fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
         String::json_schema(gen)
@@ -244,13 +245,13 @@ impl schemars::JsonSchema for BigInt {
     }
 }
 
-impl std::fmt::Display for BigInt {
+impl std::fmt::Display for BigInteger {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.num.fmt(f)
     }
 }
 
-impl std::str::FromStr for BigInt {
+impl std::str::FromStr for BigInteger {
     type Err = num_bigint::ParseBigIntError;
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         num_bigint::BigInt::from_str(string).map(|num| Self {
@@ -260,7 +261,7 @@ impl std::str::FromStr for BigInt {
     }
 }
 
-impl BigInt {
+impl BigInteger {
     // can't be a trait due to being in other crate
     pub fn from_int(x: &Int) -> Self {
         Self {
@@ -279,6 +280,28 @@ impl BigInt {
         match u64_digits.len() {
             0 => Some(0),
             1 => Some(*u64_digits.first().unwrap()),
+            _ => None,
+        }
+    }
+
+    /// Converts to a u128
+    /// Returns None if the number was negative or too big for a u128
+    pub fn as_u128(&self) -> Option<u128> {
+        let (sign, u32_digits) = self.num.to_u32_digits();
+        if sign == num_bigint::Sign::Minus {
+            return None;
+        }
+        match *u32_digits {
+            [] => Some(0),
+            [a] => Some(u128::from(a)),
+            [a, b] => Some(u128::from(b) | (u128::from(a) << 32)),
+            [a, b, c] => Some(u128::from(c) | (u128::from(b) << 32) | (u128::from(a) << 64)),
+            [a, b, c, d] => Some(
+                u128::from(d)
+                    | (u128::from(c) << 32)
+                    | (u128::from(b) << 64)
+                    | (u128::from(a) << 96),
+            ),
             _ => None,
         }
     }
@@ -325,7 +348,7 @@ impl BigInt {
     }
 }
 
-impl Serialize for BigInt {
+impl Serialize for BigInteger {
     fn serialize<'se, W: Write>(
         &self,
         serializer: &'se mut Serializer<W>,
@@ -413,7 +436,7 @@ impl Serialize for BigInt {
     }
 }
 
-impl Deserialize for BigInt {
+impl Deserialize for BigInteger {
     fn deserialize<R: BufRead + Seek>(raw: &mut Deserializer<R>) -> Result<Self, DeserializeError> {
         (|| -> Result<_, DeserializeError> {
             match raw.cbor_type()? {
@@ -468,11 +491,11 @@ impl Deserialize for BigInt {
                 _ => Err(DeserializeFailure::NoVariantMatched.into()),
             }
         })()
-        .map_err(|e| e.annotate("BigInt"))
+        .map_err(|e| e.annotate("BigInteger"))
     }
 }
 
-impl<T> std::convert::From<T> for BigInt
+impl<T> std::convert::From<T> for BigInteger
 where
     T: std::convert::Into<num_bigint::BigInt>,
 {
@@ -549,11 +572,12 @@ impl Deserialize for NetworkId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
-    fn bigint_uint_min() {
+    fn bigint_uint_u64_min() {
         let bytes = [0x00];
-        let x = BigInt::from_cbor_bytes(&bytes).unwrap();
+        let x = BigInteger::from_cbor_bytes(&bytes).unwrap();
         assert_eq!(bytes, x.to_cbor_bytes().as_slice());
         assert_eq!(x.as_u64(), Some(u64::MIN));
         assert_eq!(x.as_int().unwrap().to_string(), x.to_string());
@@ -561,9 +585,9 @@ mod tests {
     }
 
     #[test]
-    fn bigint_uint_max() {
+    fn bigint_uint_u64_max() {
         let bytes = [0x1B, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-        let x = BigInt::from_cbor_bytes(&bytes).unwrap();
+        let x = BigInteger::from_cbor_bytes(&bytes).unwrap();
         assert_eq!(bytes, x.to_cbor_bytes().as_slice());
         assert_eq!(x.as_u64(), Some(u64::MAX));
         assert_eq!(x.as_int().unwrap().to_string(), x.to_string());
@@ -571,11 +595,31 @@ mod tests {
     }
 
     #[test]
+    fn bigint_uint_u128_min() {
+        let bytes = [0x00];
+        let x = BigInteger::from_cbor_bytes(&bytes).unwrap();
+        assert_eq!(bytes, x.to_cbor_bytes().as_slice());
+        assert_eq!(x.as_u128(), Some(u128::MIN));
+        assert_eq!(x.to_string(), "0");
+    }
+
+    #[test]
+    fn bigint_uint_u128_max() {
+        let bytes = BigInteger::from_str(&u128::MAX.to_string())
+            .unwrap()
+            .to_cbor_bytes();
+        let x = BigInteger::from_cbor_bytes(&bytes).unwrap();
+        assert_eq!(bytes, x.to_cbor_bytes().as_slice());
+        assert_eq!(x.as_u128(), Some(u128::MAX));
+        assert_eq!(x.to_string(), "340282366920938463463374607431768211455");
+    }
+
+    #[test]
     fn bigint_above_uint_min() {
         let bytes = [
             0xC2, 0x49, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-        let x = BigInt::from_cbor_bytes(&bytes).unwrap();
+        let x = BigInteger::from_cbor_bytes(&bytes).unwrap();
         assert_eq!(bytes, x.to_cbor_bytes().as_slice());
         assert_eq!(x.as_int(), None);
         assert_eq!(x.to_string(), "18446744073709551616");
@@ -584,7 +628,7 @@ mod tests {
     #[test]
     fn bigint_nint_min() {
         let bytes = [0x3B, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-        let x = BigInt::from_cbor_bytes(&bytes).unwrap();
+        let x = BigInteger::from_cbor_bytes(&bytes).unwrap();
         assert_eq!(bytes, x.to_cbor_bytes().as_slice());
         assert_eq!(
             Into::<i128>::into(&x.as_int().unwrap()),
@@ -597,7 +641,7 @@ mod tests {
     #[test]
     fn bigint_nint_max() {
         let bytes = [0x20];
-        let x = BigInt::from_cbor_bytes(&bytes).unwrap();
+        let x = BigInteger::from_cbor_bytes(&bytes).unwrap();
         assert_eq!(bytes, x.to_cbor_bytes().as_slice());
         assert_eq!(x.as_u64(), None);
         assert_eq!(x.as_int().unwrap().to_string(), x.to_string());
@@ -609,7 +653,7 @@ mod tests {
         let bytes = [
             0xC3, 0x49, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-        let x = BigInt::from_cbor_bytes(&bytes).unwrap();
+        let x = BigInteger::from_cbor_bytes(&bytes).unwrap();
         assert_eq!(bytes, x.to_cbor_bytes().as_slice());
         assert_eq!(x.as_int(), None);
         assert_eq!(x.to_string(), "-18446744073709551617");

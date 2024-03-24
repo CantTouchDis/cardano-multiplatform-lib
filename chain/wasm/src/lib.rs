@@ -5,7 +5,7 @@
 )]
 
 use ::wasm_bindgen::prelude::{wasm_bindgen, JsError, JsValue};
-use cml_core_wasm::metadata::TransactionMetadatumList;
+use auxdata::TransactionMetadatumList;
 use cml_core_wasm::{impl_wasm_cbor_json_api, impl_wasm_conversions, impl_wasm_list};
 
 pub use cml_core_wasm::Int;
@@ -20,6 +20,7 @@ pub mod certs;
 pub mod crypto;
 pub mod deposit;
 pub mod fees;
+pub mod genesis;
 pub mod governance;
 pub mod json;
 pub mod min_ada;

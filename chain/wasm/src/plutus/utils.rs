@@ -1,10 +1,10 @@
 use crate::{plutus::PlutusData, PlutusDataList, RedeemerList};
 use cml_chain::plutus::Language;
-use cml_core_wasm::{impl_wasm_cbor_json_api, impl_wasm_conversions};
+use cml_core_wasm::{impl_wasm_cbor_api, impl_wasm_cbor_json_api, impl_wasm_conversions};
 use cml_crypto_wasm::ScriptHash;
 use wasm_bindgen::prelude::{wasm_bindgen, JsError, JsValue};
 
-use super::{ExUnits, PlutusV1Script, PlutusV2Script};
+use super::{ExUnits, PlutusV1Script, PlutusV2Script, PlutusV3Script};
 
 #[derive(Clone, Debug)]
 #[wasm_bindgen]
@@ -38,7 +38,7 @@ pub struct PlutusMap(cml_chain::plutus::PlutusMap);
 
 impl_wasm_conversions!(cml_chain::plutus::PlutusMap, PlutusMap);
 
-impl_wasm_cbor_json_api!(PlutusMap);
+impl_wasm_cbor_api!(PlutusMap);
 
 #[wasm_bindgen]
 impl PlutusMap {
@@ -89,8 +89,22 @@ impl PlutusMap {
 #[derive(Clone, Debug)]
 pub struct PlutusScript(cml_chain::plutus::utils::PlutusScript);
 
+impl_wasm_conversions!(cml_chain::plutus::utils::PlutusScript, PlutusScript);
+
 #[wasm_bindgen]
 impl PlutusScript {
+    pub fn from_v1(script: &PlutusV1Script) -> Self {
+        cml_chain::plutus::utils::PlutusScript::PlutusV1(script.as_ref().clone()).into()
+    }
+
+    pub fn from_v2(script: &PlutusV2Script) -> Self {
+        cml_chain::plutus::utils::PlutusScript::PlutusV2(script.as_ref().clone()).into()
+    }
+
+    pub fn from_v3(script: &PlutusV3Script) -> Self {
+        cml_chain::plutus::utils::PlutusScript::PlutusV3(script.as_ref().clone()).into()
+    }
+
     pub fn hash(&self) -> ScriptHash {
         self.0.hash().into()
     }
@@ -105,6 +119,13 @@ impl PlutusScript {
     pub fn as_v2(&self) -> Option<PlutusV2Script> {
         match &self.0 {
             cml_chain::plutus::utils::PlutusScript::PlutusV2(v2) => Some(v2.clone().into()),
+            _ => None,
+        }
+    }
+
+    pub fn as_v3(&self) -> Option<PlutusV3Script> {
+        match &self.0 {
+            cml_chain::plutus::utils::PlutusScript::PlutusV3(v3) => Some(v3.clone().into()),
             _ => None,
         }
     }
